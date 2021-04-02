@@ -1,0 +1,232 @@
+# *********************************************
+# 프로그램 관리
+# 최초 작성일 : 2020.10.09
+# 작성자 : hazel (hazelnuttree@naver.com)
+# 최종 업데이트 : 2020.10.20
+# 최종 버전 : v1.3
+# 업데이트 주요 내용 : 엑셀 제목칼럼 추가, 크롬 드리아버 오류 수정
+# *********************************************
+
+# 프로그램 설명서
+# ---------------------------------------------
+"""
+[개요]
+관심있는 네이버 뉴스기사 중 댓글을 검색해서 엑셀파일로 정리해 주는 프로그램
+
+[환경설정]
+1. 압축파일을 원하는 폴더에 풀어주기
+2. 크롬(chrome)이 없다면 설치(인터넷 연결 필수)
+
+[사용방법]
+1. naver.exe 를 실행시키면 검색건수와 검색어를 입력하는 팝업창 생성
+2. 검색범위는 1에서 10 사이를 선택 (네이버 뉴스 하단의 페이지 번호를 의미)
+   예) 1 입력 -> 1페이지 내 뉴스에서만 조회
+3. 검색어를 입력하고 OK 클릭 (보안 경고가 나오면, 무시해도 됨 -- 바이러스 없음)
+4. 실행 후 naver_news_reply.exe 가 위치한 폴더에 "네이버 뉴스 댓글_검색어_YY-MM-DD.xlsx" 엑셀파일 생성
+
+[참고]
+1. 네이버 뉴스 페이지 중 "네이버 뉴스"에 댓글이 실린 기사만 출력
+2. 대댓글은 출력하지 않음
+3. 엑셀파일의 맨 마지막 행은 댓글이 없어도 출력됨(일종의 버그인데, 수정하기 귀찮아서 안함)
+   (엑셀파일 헤더는 각 "언론사명, 해당기사명, 작성시간, 댓글내용, 공감, 비공감)
+
+[문의처]
+hazelnut@kodit.co.kr
+"""
+# *********************************************
+
+# 환경 설정
+# ---------------------------------------------
+import tkinter as tk
+import requests
+import openpyxl
+import datetime
+import time
+import re
+import sys
+
+from tkinter import *
+from tkinter import messagebox
+from selenium import webdriver
+import selenium
+from selenium import webdriver
+from webdriver_manager.chrome import ChromeDriverManager
+from bs4 import BeautifulSoup
+from urllib import request
+
+options = webdriver.ChromeOptions()
+options.add_experimental_option('excludeSwitches',['enable-logging'])
+
+# *********************************************
+
+# UI 설정
+# ---------------------------------------------
+root = tk.Tk()
+root.title("page 선택")
+root.geometry("470x120+200+200")
+root.resizable(False, False)
+
+def start():
+    global end_page, find_word, cnt
+
+    if datetime.datetime.today() > datetime.datetime(2021,12,31) :
+        tk.messagebox.showinfo("경고","프로그램 유효기간이 지났습니다. 개발자에게 문의해 주세요")
+        sys.exit()
+
+    end_page = int(input_page.get())+1
+    find_word = input_find.get()
+
+    if end_page < 2 or end_page > 11:
+        tk.messagebox.showinfo("경고","1에서 10사이의 숫자를 입력하세요.")
+    else:
+        root.destroy()
+
+lbl1 = Label(root, text = " 수집가능한 인터넷 페이지를 입력해 주세요 (1=1page) ", font = "NanumGothic 8")
+lbl1.place(x=10, y=20)
+
+input_page = Entry(root,width=7)
+input_page.place(x=300, y=20)
+
+lbl2 = Label(root, text = " 검색어를 입력해 주세요.  ", font = "NanumGothic 8")
+lbl2.place(x=10, y=50)
+
+input_find = Entry(root,width=15)
+input_find.place(x=300, y=50)
+
+btn = Button(root, text ="OK", command = start, width=3, height=1)
+btn.place(x=420, y=50)
+
+lbl2 = Label(root, text = " ※ 문의처 : hazelnut@kodit.co.kr ", font = "NanumGothic 8")
+lbl2.place(x=10, y=90)
+
+root.mainloop()
+# *********************************************
+
+# 크롤링
+# ---------------------------------------------
+# 드라이버 설정
+driver = webdriver.Chrome(ChromeDriverManager().install(), options=options)
+driver2 = webdriver.Chrome(ChromeDriverManager().install(),options=options)
+# driver = webdriver.Chrome('/chromedriver.exe')
+# driver2 = webdriver.Chrome('/chromedriver.exe')
+
+# 엑셀저장 설정
+xl = openpyxl.Workbook()
+sheet = xl.active
+sheet.title = '네이버 뉴스 댓글'
+sheet2 = xl.create_sheet('네이버 뉴스 기사 본문')
+
+sheet.append(["언론사","기사제목","보도일자","댓글","좋아요","싫어요"])
+sheet2.append(["언론사","기사제목","보도일자","기사내용"])
+
+# 홈페이지 접속
+adr = 'https://search.naver.com/search.naver?query=' + find_word + '&where=news&ie=utf8&sm=nws_hty'
+driver.get(adr)
+raw = driver.page_source
+html = BeautifulSoup(raw, 'html.parser')
+# -- 네이버 뉴스만 선택
+# news = driver.find_elements_by_xpath('//a[text()=' + "네이버뉴스" + ']')
+news = html.find_all('a', text = re.compile("네이버뉴스"))
+print(news)
+
+if news is None:
+    tk.messagebox.showinfo("정보", "검색어에 해당하는 네이버뉴스가 없습니다.")
+    sys.exit()
+
+# 저장변수 설정
+# 뉴스제목정보
+list = []
+
+# 댓글정보
+list_reply = []
+# 뉴스제목 반복
+i = 0
+# 댓글 반복
+j = 0
+cnt = 0
+
+# 검색페이지 반복
+for page in range(1,end_page):
+
+    # 검색페이지 이동
+    if page > 1:
+        driver.find_element_by_xpath('//a[text()=' + str(page) + ']').click()
+        raw = driver.page_source
+        html = BeautifulSoup(raw, 'html.parser')
+        news = html.find_all('a', text=re.compile("네이버뉴스"))
+
+    # 변수 초기화
+
+    # 검색된 뉴스 크롤링 반복
+    for news_i in news:
+
+        # 뉴스 본문 이동
+        link = news_i["href"]
+        href_str = link[:22]
+
+        if str(href_str) == "https://news.naver.com":
+            driver2.get(link)
+            # driver.find_element_by_xpath('//a[@href="' + str(link) + '"]').click()
+            time.sleep(2)
+            raw2 = driver2.page_source
+            html2 = BeautifulSoup(raw2, 'html.parser')
+            print(link)
+
+            # 뉴스 정보 저장
+            publisher = html2.find('div', class_='press_logo').find('img')
+            pub = publisher.get('title')
+            press = "■" + str(pub)
+            print(pub)
+
+            if pub is not None:
+                title = html2.find('h3', class_='tts_head').text.strip()
+                date = html2.find('span', class_='t11').text.strip()
+                body = html2.find('div', class_='_article_body_contents').text.strip()
+                list.append([press, title, date])
+                sheet.cell(row=j+2, column=1).value = str(list[i][0])
+                sheet.cell(row=j+2, column=2).value = str(list[i][1])
+                sheet.cell(row=j+2, column=3).value = str(list[i][2])
+                sheet2.append([press, title, date, body])
+                print("************")
+
+                # 댓글정보 수집
+                reply_area = html2.find('ul', class_='u_cbox_list')
+                if reply_area is not None:
+                    reply_list = reply_area.find_all('div', class_='u_cbox_area')
+
+                    # 댓글 수 만큼 반복
+                    for reply_i in reply_list:
+                        reply_body = reply_i.find('span', class_='u_cbox_contents')
+
+                        # 댓글 정보 저장
+                        if reply_body is not None:
+                            reply = reply_body.text.strip()
+                            reply_agree = reply_i.find('em', class_='u_cbox_cnt_recomm').text
+                            reply_disagree = reply_i.find('em', class_='u_cbox_cnt_unrecomm').text
+                            #sheet.append([reply, reply_agree, reply_disagree])
+                            list_reply.append([reply, reply_agree, reply_disagree])
+                            sheet.cell(row=j+2, column=4).value = str(list_reply[j][0])
+                            sheet.cell(row=j+2, column=5).value = str(list_reply[j][1])
+                            sheet.cell(row=j+2, column=6).value = str(list_reply[j][2])
+                            j += 1
+                i += 1
+cnt = j
+print("**cnt**:", cnt)
+
+# *********************************************
+
+# 프로그램 결과 메세지 출력
+# ---------------------------------------------
+if cnt == 0 :
+   tk.messagebox.showinfo("정보", "댓글이 없습니다.")
+else:
+   tk.messagebox.showinfo("정보", "프로그램이 총" + str(cnt) + " 건의 댓글을 검색하었습니다.")
+# *********************************************
+
+# 엑셀 저장
+# ---------------------------------------------
+dt = datetime.datetime.today()
+savetime = dt.strftime("_%y_%m_%d")
+xl.save('네이버 뉴스 댓글_' + find_word + savetime + '.xlsx')
+xl.close()
+# *********************************************
